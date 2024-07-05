@@ -9,9 +9,6 @@ load_dotenv()
 # Initialize Flask app
 app = Flask(__name__)
 
-# Initialize Notion client
-notion = Client(auth=os.environ['NOTION_API_KEY'])
-
 def format_data_for_notion(llm_output, notes=""):
     property_mapping = {
         "Company Name": "Company Name",
@@ -80,30 +77,39 @@ def format_data_for_notion(llm_output, notes=""):
 
     return formatted_data
 
-def update_notion_database(llm_output, notes=""):
+def update_notion_database(api_key, database_id, formatted_data):
     try:
-        formatted_data = format_data_for_notion(llm_output, notes)
+        notion = Client(auth=api_key)
         response = notion.pages.create(
-            parent={"database_id": os.environ['NOTION_DATABASE_ID']},
+            parent={"database_id": database_id},
             properties=formatted_data
         )
         print(f"Successfully added new page to Notion. Page ID: {response['id']}")
-        return True
+        return True, response['id']
     except Exception as e:
         print(f"Error updating Notion database: {str(e)}")
-        return False
+        return False, str(e)
 
 @app.route("/update-notion", methods=['POST'])
 def update_notion():
     try:
         data = request.json
-        llm_output = data.get('llm_output', {})
+        api_key = data.get('apiKey', os.environ['NOTION_API_KEY'])
+        database_id = data.get('databaseId', os.environ['NOTION_DATABASE_ID'])
+        llm_output = data.get('llmOutput', {})
         notes = data.get('notes', '')
-        success = update_notion_database(llm_output, notes)
-        return jsonify({"success": success})
+
+        formatted_data = format_data_for_notion(llm_output, notes)
+        success, result = update_notion_database(api_key, database_id, formatted_data)
+
+        if success:
+            return jsonify({"success": True, "pageId": result})
+        else:
+            return jsonify({"success": False, "error": result})
+
     except Exception as error:
         print('Error:', error)
-        return jsonify({"error": "Internal server error"}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 if __name__ == "__main__":
     app.run(port=int(os.environ.get('PORT', 3000)))
